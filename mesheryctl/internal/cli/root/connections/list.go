@@ -22,7 +22,7 @@ var listConnectionsCmd = &cobra.Command{
 	Long:  `List all the connections`,
 	Example: `
 // List all the connections
-mesheryctl exp connections list 
+mesheryctl exp connections list
 
 // List all the connections with page number
 mesheryctl exp connections list --page 2
@@ -36,18 +36,15 @@ mesheryctl exp connections list --page 2
 		}
 		err = utils.IsServerRunning(mctlCfg.GetBaseMesheryURL())
 		if err != nil {
-			utils.Log.Error(err)
 			return err
 		}
 		ctx, err := mctlCfg.GetCurrentContext()
 		if err != nil {
-			utils.Log.Error(system.ErrGetCurrentContext(err))
-			return nil
+			return system.ErrGetCurrentContext(err)
 		}
 		err = ctx.ValidateVersion()
 		if err != nil {
-			utils.Log.Error(err)
-			return nil
+			return err
 		}
 		return nil
 	},

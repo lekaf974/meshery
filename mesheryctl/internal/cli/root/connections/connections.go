@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	availableSubcommands = []*cobra.Command{listConnectionsCmd, deleteConnectionCmd}
+	availableSubcommands = []*cobra.Command{listConnectionsCmd, deleteConnectionCmd, viewConnectionCmd}
 
 	pageNumberFlag int
 	maxRowsPerPage = 25
@@ -35,18 +35,15 @@ mesheryctl exp connections list
 		}
 		err = utils.IsServerRunning(mctlCfg.GetBaseMesheryURL())
 		if err != nil {
-			utils.Log.Error(err)
-			return nil
+			return err
 		}
 		ctx, err := mctlCfg.GetCurrentContext()
 		if err != nil {
-			utils.Log.Error(system.ErrGetCurrentContext(err))
-			return nil
+			return system.ErrGetCurrentContext(err)
 		}
 		err = ctx.ValidateVersion()
 		if err != nil {
-			utils.Log.Error(err)
-			return nil
+			return err
 		}
 		return nil
 	},
@@ -54,7 +51,7 @@ mesheryctl exp connections list
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			if err := cmd.Usage(); err != nil {
-				return nil
+				return err
 			}
 			return errors.New("please provide a subcommand")
 		}
@@ -80,6 +77,10 @@ mesheryctl exp connections list
 func init() {
 	listConnectionsCmd.Flags().BoolP("count", "c", false, "Display the count of models")
 	listConnectionsCmd.Flags().IntVarP(&pageNumberFlag, "page", "p", 1, "Page number")
+
 	deleteConnectionCmd.Flags().StringP("id", "i", "", "ID of the connection to be deleted")
+
+	viewConnectionCmd.Flags().StringP("id", "i", "", "ID of the connection to be viewed")
+
 	ConnectionsCmd.AddCommand(availableSubcommands...)
 }

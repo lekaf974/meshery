@@ -98,6 +98,10 @@ const (
 	environmentDeleteURL           = docsBaseURL + "reference/mesheryctl/exp/environment/delete"
 	environmentListURL             = docsBaseURL + "reference/mesheryctl/exp/environment/list"
 	environmentViewURL             = docsBaseURL + "reference/mesheryctl/exp/environment/view"
+	connectionsUsageURL            = docsBaseURL + "references/exp/connections"
+	connectionDeleteURL            = docsBaseURL + "references/exp/connections/delete"
+	connectionListURL              = docsBaseURL + "references/exp/connections/list"
+	connectionViewURL              = docsBaseURL + "references/exp/connections/view"
 
 	// Meshery Server Location
 	EndpointProtocol = "http"
@@ -145,8 +149,10 @@ const (
 	cmdModelView                cmdType = "model view"
 	cmdRegistryPublish          cmdType = "registry publish"
 	cmdRegistry                 cmdType = "regisry"
-	cmdConnectionList           cmdType = "connection list"
+	cmdConnections              cmdType = "connectrion"
 	cmdConnectionDelete         cmdType = "connection delete"
+	cmdConnectionList           cmdType = "connection list"
+	cmdConnectionView           cmdType = "connection view"
 	cmdRelationships            cmdType = "relationships"
 	cmdRelationshipGenerateDocs cmdType = "relationships generate docs"
 	cmdRelationshipView         cmdType = "relationship view"
