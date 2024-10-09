@@ -359,8 +359,8 @@ func TestParseURLGithub(t *testing.T) {
 		},
 		{
 			name:          "test with github.com",
-			url:           "https://github.com/layer5io/meshery/blob/master/.github/.goreleaser.yml",
-			rawRepoOutput: "https://github.com/layer5io/meshery/master/.github",
+			url:           "https://github.com/meshery/meshery/blob/master/.github/.goreleaser.yml",
+			rawRepoOutput: "https://github.com/meshery/meshery/master/.github/.goreleaser.yml",
 			pathOutput:    ".goreleaser.yml",
 		},
 		{
