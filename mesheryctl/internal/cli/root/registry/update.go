@@ -17,6 +17,7 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,10 +52,16 @@ mesheryctl registry update --spreadsheet-id [id] --spreadsheet-cred [base64 enco
 
 // Updating models in the meshery/meshery repo
 mesheryctl registry update --spreadsheet-id 1DZHnzxYWOlJ69Oguz4LkRVTFM79kC2tuvdwizOJmeMw --spreadsheet-cred $CRED
+
 // Updating models in the meshery/meshery repo based on flag
 mesheryctl registry update --spreadsheet-id 1DZHnzxYWOlJ69Oguz4LkRVTFM79kC2tuvdwizOJmeMw --spreadsheet-cred $CRED --model "[model-name]"
 	`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		const errorMsg = "[ Spreadsheet ID | Spreadsheet Credentials ] aren't specified\n\nUsage: \nmesheryctl registry update --spreadsheet-id [id] --spreadsheet-cred [base64 encoded spreadsheet credential]\nRun 'mesheryctl registry update --help' to see detailed help message"
+
+		if spreadsheeetID == "" || spreadsheeetCred == "" {
+			return errors.New(utils.RegistryError(errorMsg, "update"))
+		}
 
 		err := os.MkdirAll(logDirPath, 0755)
 		if err != nil {
@@ -72,21 +79,18 @@ mesheryctl registry update --spreadsheet-id 1DZHnzxYWOlJ69Oguz4LkRVTFM79kC2tuvdw
 
 		srv, err := mutils.NewSheetSRV(spreadsheeetCred)
 		if err != nil {
-			utils.Log.Error(ErrUpdateRegistry(err, modelLocation))
-			return err
+			return errors.New(utils.RegistryError("Invalid JWT Token or Google Sheet API connection issue. Ensure the provided token is a base64-encoded, valid Google Spreadsheets API token.", "update"))
 		}
 		resp, err := srv.Spreadsheets.Get(spreadsheeetID).Fields().Do()
 		if err != nil || resp.HTTPStatusCode != 200 {
-			utils.Log.Error(ErrUpdateRegistry(err, outputLocation))
-			return err
+			return ErrUpdateRegistry(err, outputLocation)
 		}
 
 		sheetGID = GetSheetIDFromTitle(resp, "Components")
 
 		err = InvokeCompUpdate()
 		if err != nil {
-			utils.Log.Error(err)
-			return nil
+			return err
 		}
 
 		return nil
