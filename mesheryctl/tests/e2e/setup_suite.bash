@@ -28,6 +28,9 @@ create_auth_file() {
 
     # Generate auth file to comunicate with meshery server
     echo "{\"meshery-provider\": \"Meshery\", \"token\": \"${MESHERY_PROVIDER_TOKEN}\"}" > "$HOME/.meshery/auth.json"
+    
+    cat "$HOME/.meshery/auth.json" 
+    
     echo "done: authentication configuration"
 }
 
