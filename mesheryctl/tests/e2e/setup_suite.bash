@@ -51,7 +51,7 @@ main() {
     install_mesheryctl "$MESHERY_PLATFORM"
     create_meshery_config_folder
     create_auth_file 
-    port_forwarding
+    # port_forwarding
     config_mesheryctl_port_forwarding_endpoint
     
     export MESHERYCTL_BIN="mesheryctl"
