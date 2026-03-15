@@ -247,6 +247,8 @@
           grandchildren:
             - title: Design Principles
               url: project/contributing/contributing-cli-guide
+            - title: Common Subcommand Verbs
+              url: project/contributing/contributing-cli-subcommands
             - title: End-to-End CLI Tests
               url: project/contributing/contributing-cli-tests
         - title: Docs ↆ
