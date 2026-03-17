@@ -64,7 +64,7 @@ func TestSaveWorkspaceHandler(t *testing.T) {
 		validateBody   func(t *testing.T, body string)
 	}{
 		{
-			name: "valid workspace creation returns 201",
+			name: "given a valid workspace when SaveWorkspaceHandler then return 201",
 			body: `{"name":"my-workspace","description":"a test workspace","organization_id":"00000000-0000-0000-0000-000000000001"}`,
 			setupProvider: func(t *testing.T) models.Provider {
 				return newInMemoryWorkspaceProvider(t)
@@ -84,7 +84,7 @@ func TestSaveWorkspaceHandler(t *testing.T) {
 			},
 		},
 		{
-			name: "workspace without description is accepted",
+			name: "given a workspace without description when SaveWorkspaceHandler then return 201",
 			body: `{"name":"minimal-workspace","organization_id":"00000000-0000-0000-0000-000000000001"}`,
 			setupProvider: func(t *testing.T) models.Provider {
 				return newInMemoryWorkspaceProvider(t)
@@ -104,7 +104,7 @@ func TestSaveWorkspaceHandler(t *testing.T) {
 			},
 		},
 		{
-			name: "empty body returns 500",
+			name: "given an empty body when SaveWorkspaceHandler then return 500",
 			body: "",
 			setupProvider: func(t *testing.T) models.Provider {
 				return newInMemoryWorkspaceProvider(t)
@@ -112,7 +112,7 @@ func TestSaveWorkspaceHandler(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
-			name: "malformed JSON returns 500",
+			name: "given malformed JSON when SaveWorkspaceHandler then return 500",
 			body: "{not-valid-json}",
 			setupProvider: func(t *testing.T) models.Provider {
 				return newInMemoryWorkspaceProvider(t)
@@ -122,7 +122,7 @@ func TestSaveWorkspaceHandler(t *testing.T) {
 		{
 			// SaveWorkspaceHandler maps provider errors to HTTP 404 Not Found.
 			// The test validates this existing handler behaviour.
-			name: "provider failure returns 404",
+			name: "given a provider failure when SaveWorkspaceHandler then return 404",
 			body: `{"name":"test-workspace","organization_id":"00000000-0000-0000-0000-000000000002"}`,
 			setupProvider: func(t *testing.T) models.Provider {
 				base := newInMemoryWorkspaceProvider(t)
