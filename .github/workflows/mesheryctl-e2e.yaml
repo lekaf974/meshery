@@ -72,6 +72,8 @@ jobs:
           echo 'Running minikube tunnel'
           minikube tunnel &> /dev/null &
         shell: bash
+      - name: Install lynx for xdg-open support
+        run: sudo apt-get install lynx
       - name: Get Date
         id: date
         run: echo "date=$(date +'%Y-%m-%d-%H.%M.%S')" >> $GITHUB_OUTPUT
