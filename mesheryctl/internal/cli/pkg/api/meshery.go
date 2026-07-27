@@ -13,7 +13,78 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Generic function to fetch data from Mesehry server needs to be type of meshery data ApiResponse
+// MesheryApiClient is the unified client for communicating with the Meshery server.
+type MesheryApiClient struct {
+	baseURL string
+}
+
+// NewApiClient creates a new MesheryApiClient using the current context configuration.
+func NewApiClient() (*MesheryApiClient, error) {
+	mctlCfg, err := config.GetMesheryCtl(viper.GetViper())
+	if err != nil {
+		return nil, utils.ErrLoadConfig(err)
+	}
+	return &MesheryApiClient{
+		baseURL: mctlCfg.GetBaseMesheryURL(),
+	}, nil
+}
+
+// Get makes a GET request to the given URL path and returns the raw HTTP response.
+func (c *MesheryApiClient) Get(urlPath string) (*http.Response, error) {
+	return c.doRequest(urlPath, http.MethodGet, nil, nil)
+}
+
+// Delete makes a DELETE request to the given URL path.
+func (c *MesheryApiClient) Delete(urlPath string) (*http.Response, error) {
+	return c.doRequest(urlPath, http.MethodDelete, nil, nil)
+}
+
+// Add makes a POST request to the given URL path with the provided body and optional headers.
+// headers may be nil. Header keys/values will be added to the http.Request before dispatch.
+func (c *MesheryApiClient) Add(urlPath string, body io.Reader, headers map[string]string) (*http.Response, error) {
+	return c.doRequest(urlPath, http.MethodPost, body, headers)
+}
+
+// Send makes a request with the given HTTP method and URL path.
+func (c *MesheryApiClient) Send(method, urlPath string, body io.Reader) (*http.Response, error) {
+	return c.doRequest(urlPath, method, body, nil)
+}
+
+func (c *MesheryApiClient) doRequest(urlPath, httpMethod string, body io.Reader, headers map[string]string) (*http.Response, error) {
+	req, err := utils.NewRequest(httpMethod, fmt.Sprintf("%s/%s", c.baseURL, urlPath), body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add any provided headers to the request. This is important for callers
+	// that construct bodies externally (e.g., multipart form) and need to
+	// preserve Content-Type or other headers.
+	for k, v := range headers {
+		if http.CanonicalHeaderKey(k) == "Content-Type" {
+			// Ensure we set Content-Type directly (replace any existing)
+			req.Header.Set(k, v)
+		} else {
+			req.Header.Add(k, v)
+		}
+	}
+
+	resp, err := utils.MakeRequest(req)
+	if err != nil {
+		if meshkitErr, ok := err.(*mErrors.Error); ok {
+			if meshkitErr.Code == utils.ErrFailRequestCode {
+				errCtx := fmt.Sprintf("Unable to connect to Meshery server at %s (current context).", c.baseURL)
+				failedReqErr := utils.ErrFailRequest(fmt.Errorf("%s", errCtx))
+				errRemediation := mErrors.GetRemedy(failedReqErr)
+				return nil, utils.ErrFailRequest(fmt.Errorf("%s\n%s\n%s", errCtx, errRemediation, generateErrorReferenceDetails("ErrFailRequestCode", utils.ErrFailRequestCode)))
+			}
+		}
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+// Generic function to fetch data from Meshery server needs to be type of meshery data ApiResponse
 func Fetch[T any](url string) (*T, error) {
 	resp, err := makeRequest(url, http.MethodGet, nil, nil)
 	if err != nil {
