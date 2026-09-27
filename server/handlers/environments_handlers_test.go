@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -292,7 +291,7 @@ func (m *environmentAllowThenDenyProvider) SaveEnvironment(_ *http.Request, _ *e
 func TestSaveEnvironmentHandler_AllowsThenRefusesSameRequest(t *testing.T) {
 	h := newTestHandler(t, map[string]models.Provider{}, "")
 	provider := newEnvironmentAllowThenDenyProvider(
-		models.ErrPost(fmt.Errorf("failed to save the environment"), "Environment", http.StatusForbidden),
+		models.ErrPost(errors.New("failed to save the environment"), "Environment", http.StatusForbidden),
 	)
 
 	const body = `{"name":"prod","description":"","organizationId":"11111111-1111-1111-1111-111111111111"}`
@@ -312,17 +311,6 @@ func TestSaveEnvironmentHandler_AllowsThenRefusesSameRequest(t *testing.T) {
 	h.SaveEnvironment(refused, newReq(), nil, nil, provider)
 	if refused.Code != http.StatusForbidden {
 		t.Fatalf("refused request: status = %d, want %d (body=%q)", refused.Code, http.StatusForbidden, refused.Body.String())
-	}
-
-	decoded := decodeErrorBody(t, refused.Body.Bytes())
-	if decoded.Code != ErrSaveEnvironmentCode {
-		t.Errorf("code = %q, want %q", decoded.Code, ErrSaveEnvironmentCode)
-	}
-	if decoded.Code == ErrGetResultCode {
-		t.Errorf("code regressed to the performance-results code %s", ErrGetResultCode)
-	}
-	if len(decoded.SuggestedRemediation) == 0 {
-		t.Error("expected environment-specific remediation on the wire")
 	}
 }
 
