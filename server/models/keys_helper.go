@@ -1,6 +1,7 @@
 package models
 
 import (
+	"runtime/debug"
 	"strings"
 
 	"github.com/meshery/meshkit/database"
@@ -69,7 +70,19 @@ func (kh *KeysRegistrationHelper) SeedKeys(filePath string) {
 		return
 	}
 
+	// This goroutine is outside the reach of RunSeedStage's recover, which
+	// only covers the stage's own goroutine, so it recovers on its own. The
+	// failure is reported through ErrSeedingStagePanic with the same stage
+	// name the call sites register ("user keys"), making it indistinguishable
+	// in the log from a panic RunSeedStage caught itself. Parse's deferred
+	// cancel closes its context while unwinding, so the select loop below
+	// still observes Done and returns instead of hanging.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				kh.log.Error(ErrSeedingStagePanic("user keys", r, debug.Stack()))
+			}
+		}()
 		err := csvReader.Parse(ch, errorChan)
 		if err != nil {
 			kh.log.Error(err)
