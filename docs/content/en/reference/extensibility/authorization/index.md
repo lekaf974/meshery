@@ -80,9 +80,11 @@ On startup, Meshery Server's [`SeedKeys`](https://github.com/meshery/meshery/blo
 `SeedKeys` decides what to seed by looking up the **`Local Provider`** column by
 name in the header row of `keys.csv` (or of the file `KEYS_PATH` points at). If
 that header is renamed or dropped, the lookup matches nothing, **no** row is
-selected, and the Key table is left empty on every boot - not just for the key
-you were adding. `SeedKeys` reports this once per seeding run - at boot, and again
-after a database reset - as [`meshery-server-1486`]({{< ref "reference/references/error-codes.md" >}});
+selected, and nothing is seeded from the file - not just for the key you were
+adding. On a fresh or reset database the Key table is left empty on every boot;
+previously seeded keys are not cleared and keep working. `SeedKeys` reports this
+once per seeding run - at boot, and again after a database reset - as
+[`meshery-server-1486`]({{< ref "reference/references/error-codes.md" >}});
 restore the header and restart the server to seed again.
 
 An empty Key table is fail-closed, and its effect is confined to Meshery UI. The

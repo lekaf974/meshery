@@ -753,7 +753,7 @@ func ErrKeysRegisterColumnMissing(column string) error {
 		errors.Alert,
 		[]string{"Meshery Server could not determine which keys to register with the Local Provider"},
 		[]string{fmt.Sprintf("register column %q is missing from the keys file header", column)},
-		[]string{"The header row of the keys file was renamed or dropped, so no row could be selected for registration and the Key table stays empty"},
+		[]string{"The header row of the keys file was renamed or dropped, so no row could be selected for registration and nothing is seeded from this file; on a fresh or reset database the Key table stays empty, while previously seeded keys are left untouched"},
 		[]string{"Restore the missing header in server/permissions/keys.csv (or the file KEYS_PATH points at) and restart Meshery Server so keys seed again"},
 	)
 }
