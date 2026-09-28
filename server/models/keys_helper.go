@@ -96,16 +96,43 @@ func (kh *KeysRegistrationHelper) SeedKeys(filePath string) {
 		select {
 
 		case data := <-ch:
-			_, err := kh.keyPersister.SaveUsersKey(&data)
-			if err != nil {
-				kh.log.Error(err)
-			}
+			kh.saveSeededKey(data)
 		case err := <-errorChan:
 			kh.log.Error(err)
 
 		case <-csvReader.Context.Done():
-			return
+			// The parser calls its deferred cancel only as Parse returns,
+			// after every send has completed, so once Done is observed no
+			// further send can occur. Either channel may still hold a
+			// buffered row or error alongside Done, so drain both
+			// non-blockingly before returning instead of dropping
+			// whatever the select did not pick.
+			for {
+				select {
+				case data := <-ch:
+					kh.saveSeededKey(data)
+				case err := <-errorChan:
+					kh.log.Error(err)
+				default:
+					return
+				}
+			}
 		}
 	}
 
+}
+
+// saveSeededKey persists one parsed key. A panic from the persistence call is
+// contained here so it cannot unwind the seed loop: without a consumer the
+// parser would block forever on its next send and never run the deferred
+// cleanup that ends parsing, leaking the goroutine and the file it holds.
+func (kh *KeysRegistrationHelper) saveSeededKey(data Key) {
+	defer func() {
+		if r := recover(); r != nil {
+			kh.log.Error(ErrSeedingStagePanic("user keys", r, debug.Stack()))
+		}
+	}()
+	if _, err := kh.keyPersister.SaveUsersKey(&data); err != nil {
+		kh.log.Error(err)
+	}
 }
