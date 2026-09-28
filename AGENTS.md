@@ -222,7 +222,9 @@ make helm-docs      # Generate Helm chart docs
   event raised outside a user request through `HandlerConfig.SystemEventPersister`; index
   `Providers` only with the comma-ok form, and only on the request path. Boot-time work
   that can fault belongs inside `models.RunSeedStage` so it degrades the server rather
-  than terminating it. Detail:
+  than terminating it - but its `recover` reaches only the stage's own goroutine, so a
+  stage that spawns one must defer its own recover at the spawn site (as `SeedKeys` does)
+  instead of widening the wrapper. Detail:
   [Extensibility: Providers](./docs/content/en/reference/extensibility/providers/index.md).
 - Only `utils.Log.Error(err)` renders a MeshKit error's code, cause and remediation; cobra's
   default print shows just the message. In `mesheryctl` commands, log the structured error
