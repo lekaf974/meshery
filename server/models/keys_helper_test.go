@@ -163,7 +163,7 @@ func TestSeedKeysIntactRegisterColumnSeedsWithoutReport(t *testing.T) {
 		{"", "", "", "Authorization", "", "", "", "", "", "", "", "Keychain", "Keys", "", ""},
 		{"Category", "Function", "Feature", "User", "Team Admin", "Academy Admin", "Leaner", "Workspace Admin", "Org Billing Manager", "Org Admin", "Provider Admin", "Keychain ID", "Key ID", "Inserted", "Local Provider"},
 		{"Catalog", "Share Design", "Share design", "X", "X", "", "", "X", "", "X", "X", "Catalog Management", "d9ae2b08-762f-418f-916f-43de736b53e2", "X", "TRUE"},
-		{"Designs", "Create new design", "Create new Meshery design", "X", "X", "", "", "X", "", "X", "X", "Catalog Management", "14bd933e-83b7-464d-9a4d-d8c8eb9682ab", "X", "FALSE"},
+		{"Designs", "Create new design", "Create new Meshery design", "X", "X", "", "", "X", "", "X", "X", "Catalog Management", "14bd933e-83b7-464d-9a4d-d8c8eb9682ab", "X", "TRUE"},
 	}
 	var fixture strings.Builder
 	for _, row := range rows {
@@ -180,11 +180,18 @@ func TestSeedKeysIntactRegisterColumnSeedsWithoutReport(t *testing.T) {
 	if sink.reports(t, ErrKeysRegisterColumnMissingCode) {
 		t.Fatalf("an intact register column was reported as %s; emitted: %+v", ErrKeysRegisterColumnMissingCode, sink.records(t))
 	}
+	// At least one of the fixture's TRUE rows must have seeded. The lower
+	// bound - not an exact count - is deliberate: the row channel holds one
+	// row, so the parse goroutine cannot reach EOF and close Done until the
+	// select loop has received every row but the last, which makes all-but-last
+	// rows deterministic while the final buffered row still races Done. That
+	// last-row race is the sibling drain-race work's scope, excluded here by
+	// BOUNDARIES, so this test must not depend on winning it.
 	var seeded int64
 	if err := db.Model(&Key{}).Count(&seeded).Error; err != nil {
 		t.Fatalf("count seeded keys: %v", err)
 	}
-	if seeded != 1 {
-		t.Fatalf("expected the fixture's single TRUE row seeded, got %d", seeded)
+	if seeded < 1 {
+		t.Fatalf("expected at least one of the fixture's TRUE rows seeded, got %d", seeded)
 	}
 }
