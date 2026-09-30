@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/meshery/meshery/server/core"
@@ -71,13 +72,17 @@ func postLoginHost(r *http.Request) string {
 	return (&url.URL{Host: r.Host}).Hostname()
 }
 
-// authInitiationPaths are server routes whose job is to *start* authentication.
+// authInitiationPaths are routes whose job is to *start* authentication.
 // Post-login redirects must never land on one of these, otherwise the browser
 // immediately re-enters the OAuth dance and the original target is lost. The
 // intermittent not-loading behavior was reproduced as exactly this:
 // TokenHandler succeeded and then redirected to /user/login?provider=Meshery,
 // which restarted InitiateLogin mid-mount.
+// "/login" is the remote provider's own login page, not a Meshery route at all:
+// a custom-domain bounce synthesizes it into the ref it echoes back, and honoring
+// it served the catch-all handler as a 404 at playground.meshery.io/login.
 var authInitiationPaths = []string{
+	"/login",
 	"/user/login",
 	"/auth/login",
 	"/api/user/token",
@@ -85,7 +90,11 @@ var authInitiationPaths = []string{
 }
 
 // safePostLoginTarget validates a ref and returns the in-app path to redirect
-// to. Relative refs are kept as-is (path, query, and hash). An absolute ref on
+// to. A backslash is rejected outright: browsers resolve it as an authority
+// delimiter, so "/\evil.example" would leave the origin. The auth-path denylist
+// runs against the cleaned path, because http.Redirect itself cleans the
+// Location it writes, so "/../user/login" would otherwise reach /user/login.
+// Relative refs are kept as-is (path, query, and hash). An absolute ref on
 // Meshery's own host is reduced to its path and query so an older client that
 // sent window.location.href still lands on the design page. The scheme is not
 // part of that comparison: the callback URL carries a hard-coded http:// on
@@ -93,7 +102,7 @@ var authInitiationPaths = []string{
 // page would otherwise fail to match its own host. Every ref on another host
 // is rejected.
 func safePostLoginTarget(rawURL, host string) (string, bool) {
-	if rawURL == "" || strings.HasPrefix(rawURL, "//") {
+	if rawURL == "" || strings.HasPrefix(rawURL, "//") || strings.Contains(rawURL, `\`) {
 		return "", false
 	}
 
@@ -112,16 +121,16 @@ func safePostLoginTarget(rawURL, host string) (string, bool) {
 		return "", false
 	}
 
-	if !isAllowedAppPath(parsed.Path) {
+	if !isAllowedAppPath(path.Clean(parsed.Path)) {
 		return "", false
 	}
 
 	return target, true
 }
 
-func isAllowedAppPath(path string) bool {
+func isAllowedAppPath(appPath string) bool {
 	for _, p := range authInitiationPaths {
-		if path == p || strings.HasPrefix(path, p+"/") {
+		if appPath == p || strings.HasPrefix(appPath, p+"/") {
 			return false
 		}
 	}

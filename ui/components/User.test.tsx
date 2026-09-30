@@ -189,6 +189,31 @@ describe('User component', () => {
     expect(atob(ref as string)).toBe('/extension/meshmap?mode=design#canvas');
   });
 
+  // btoa emits standard base64. An unencoded '+' in a query value decodes back
+  // to a space, so the server's ref no longer parses as base64 and the user
+  // silently lands on '/'. A tilde in the page URL is enough to produce one.
+  it('encodes Sign In query values so a base64 plus survives the round trip', () => {
+    const pageUrl = '/extension/meshmap?mode=design&n=xx~';
+    setWindowLocation(`https://kanvas.new${pageUrl}`);
+    mockGetUserQuery = {
+      data: { status: 'anonymous', id: 'anon-1' },
+      isSuccess: true,
+      isError: false,
+      error: undefined,
+    };
+
+    render(<UserProvider />);
+
+    const href = screen.getByTestId('next-link').getAttribute('href') || '';
+    // Pre-condition: this page really does produce a '+' in the base64.
+    expect(btoa(pageUrl)).toContain('+');
+
+    const params = new URL(href).searchParams;
+    expect(atob(params.get('ref') as string)).toBe(pageUrl);
+    expect(atob(params.get('source') as string)).toBe('https://kanvas.new/api/user/token');
+    expect(params.get('anonymousUserID')).toBe('anon-1');
+  });
+
   it('renders a Sign In button when the user is anonymous', () => {
     mockGetUserQuery = {
       data: { status: 'anonymous', id: 'anon-1' },

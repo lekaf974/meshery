@@ -110,6 +110,73 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 			rawRef:   "not-base64",
 			expected: fallback,
 		},
+		// A browser resolves a backslash in the relative-slash state as an
+		// authority delimiter, so Location: /\evil.example leaves the origin.
+		// DefaultLocalProvider.InitiateLogin reaches this with no authentication
+		// at all, via GET /user/login?ref=<b64>.
+		{
+			name:     "backslash ref falls back",
+			rawRef:   `/\evil.example`,
+			expected: fallback,
+		},
+		{
+			name:     "encoded backslash ref falls back",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte(`/\evil.example`)),
+			expected: fallback,
+		},
+		{
+			name:     "backslash after a leading slash pair falls back",
+			rawRef:   `/\/evil.example`,
+			expected: fallback,
+		},
+		{
+			name:     "backslash in a same-host absolute ref falls back",
+			rawRef:   `https://kanvas.new/\evil.example`,
+			host:     host,
+			expected: fallback,
+		},
+		// http.Redirect runs path.Clean over the Location it writes, so a ref
+		// that only reaches an auth-initiation path after normalization still
+		// restarts the OAuth dance. The denylist has to see the cleaned path.
+		{
+			name:     "dot-dot traversal onto an auth path falls back",
+			rawRef:   "/../user/login",
+			expected: fallback,
+		},
+		{
+			name:     "traversal from an app path onto an auth path falls back",
+			rawRef:   "/extension/meshmap/../../user/login",
+			expected: fallback,
+		},
+		{
+			name:     "encoded traversal onto an auth path falls back",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("/extension/../api/user/token")),
+			expected: fallback,
+		},
+		{
+			name:     "traversal that stays in the app is preserved",
+			rawRef:   "/extension/meshmap/../meshmap?mode=design",
+			expected: "/extension/meshmap/../meshmap?mode=design",
+		},
+		// A custom-domain Cloud bounce synthesizes its own /login into the ref it
+		// echoes back. Meshery serves no /login route, so honoring it landed
+		// playground.meshery.io on the catch-all handler as a 404.
+		{
+			name:     "provider echoed /login falls back",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("/login")),
+			expected: fallback,
+		},
+		{
+			name:     "/login with query falls back",
+			rawRef:   "/login?provider=Meshery",
+			expected: fallback,
+		},
+		{
+			name:     "same-host absolute /login falls back",
+			rawRef:   "https://kanvas.new/login",
+			host:     host,
+			expected: fallback,
+		},
 		// Regression coverage: /user/login and /api/user/token are auth
 		// initiation paths. Redirecting to them after a successful token
 		// exchange re-enters the OAuth dance and caused to hang on

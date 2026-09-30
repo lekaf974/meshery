@@ -78,7 +78,15 @@ const User = (props) => {
   );
 
   if (userData?.status == 'anonymous') {
-    const url = `${providerCapabilities?.providerUrl}?anonymousUserID=${userData?.id}&source=${sourceURL}&ref=${refURL}`;
+    // btoa emits standard base64, whose '+' decodes back to a space in a query
+    // value. URLSearchParams percent-encodes every value, so the server reads
+    // the ref and source it was sent.
+    const params = new URLSearchParams({
+      anonymousUserID: userData?.id ?? '',
+      source: sourceURL,
+      ref: refURL,
+    });
+    const url = `${providerCapabilities?.providerUrl}?${params.toString()}`;
 
     return (
       <Link href={url}>
