@@ -90,15 +90,27 @@ var authInitiationPaths = []string{
 }
 
 // escapesOrigin reports whether a redirect target can resolve to an authority
-// other than this server's. A leading "//" is protocol-relative, and a browser
-// resolves a backslash as an authority delimiter in the relative-slash state.
-// It has to be asked of the value actually handed to http.Redirect, not only of
-// the ref as received: reducing a same-host absolute ref to parsed.RequestURI()
-// turns "https://kanvas.new//evil.example" into the protocol-relative
-// "//evil.example", which http.Redirect writes out verbatim because the target
-// it parses carries a Host and so skips its own normalization.
+// other than this server's. A leading "//" is protocol-relative, so it is
+// disqualifying anywhere in the value. A backslash only delimits an authority
+// where a browser reads one, which is the path - ending at the first "?" or
+// "#". Past that point it is a query or fragment code point that browsers pass
+// through without percent-encoding, so rejecting a whole ref over one would
+// silently drop the user's page.
+// This has to be asked of the value actually handed to http.Redirect, not only
+// of the ref as received: reducing a same-host absolute ref to
+// parsed.RequestURI() turns "https://kanvas.new//evil.example" into the
+// protocol-relative "//evil.example", which http.Redirect writes out verbatim
+// because the target it parses carries a Host and so skips its own
+// normalization.
 func escapesOrigin(target string) bool {
-	return strings.HasPrefix(target, "//") || strings.Contains(target, `\`)
+	if strings.HasPrefix(target, "//") {
+		return true
+	}
+	authority := target
+	if i := strings.IndexAny(authority, "?#"); i != -1 {
+		authority = authority[:i]
+	}
+	return strings.Contains(authority, `\`)
 }
 
 // safePostLoginTarget validates a ref and returns the in-app path to redirect
@@ -107,9 +119,10 @@ func escapesOrigin(target string) bool {
 // runs over two spellings of the destination, because http.Redirect normalizes
 // the Location it writes: the decoded parsed path, which catches "%2e%2e"
 // traversal, and the effective Location, which is everything before the first
-// "?" run through path.Clean exactly as the stdlib does it. Without the second,
-// "/extension/meshmap#/../../user/login" passes the check as its own path and
-// is then cleaned to /user/login on the way out.
+// "?" run through path.Clean exactly as the stdlib does it - it does not split
+// on "#", so a fragment falls inside that when there is no query. Without the
+// second check, "/extension/meshmap#/../../user/login" passes as its own path
+// and is then cleaned to /user/login on the way out.
 // Relative refs are kept as-is (path, query, and hash). An absolute ref on
 // Meshery's own host is reduced to its path and query so an older client that
 // sent window.location.href still lands on the design page. The scheme is not

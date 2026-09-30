@@ -613,10 +613,18 @@ func (l *RemoteProvider) InterceptLoginAndInitiateAnonymousUserSession(req *http
 	// if the ref points to some page other than under /extension then skip ref
 	refUrl, err := servercore.GetRefURLFromRequest(req)
 	l.Log.Infof("Referrer URL: %s , %v", refUrl, err)
+	// safePostLoginTarget is the same gate TokenHandler and the local provider
+	// use. The "/extension" prefix alone passes a raw string that http.Redirect
+	// then normalizes: "/extension/../../api/user/token" cleans onto the token
+	// endpoint, which re-enters TokenHandler with no token and wipes the session
+	// just minted here.
 	if strings.HasPrefix(refUrl, "/extension") {
-		l.Log.Infof("Redirecting to referrer %s", refUrl)
-		http.Redirect(res, req, refUrl, http.StatusFound)
-		return
+		if target, ok := safePostLoginTarget(refUrl, postLoginHost(req)); ok {
+			l.Log.Infof("Redirecting to referrer %s", target)
+			http.Redirect(res, req, target, http.StatusFound)
+			return
+		}
+		l.Log.Infof("Referrer %s is not a safe post-login destination, falling back", refUrl)
 	}
 
 	if redirectURL == "/" {
@@ -688,23 +696,27 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 			queryParams.Set("meshery_version", mesheryVersion)
 		}
 
+		// The anonymous exit resolves its destination from this request's own
+		// ref and never returns through TokenHandler, so a cookie here would
+		// only outlive the attempt that set it and outrank the ?ref= a later
+		// Sign In carries - which is how mode=design got dropped. Clear it.
+		if supportsAnonymousUserSessions {
+			l.clearRefCookie(w)
+			l.InterceptLoginAndInitiateAnonymousUserSession(r, w)
+			return
+		}
+
 		// Capture the originally-requested in-app path as the post-login
 		// redirect target. Meshery owns this state in a cookie on its own
 		// domain rather than round-tripping it through the remote provider's
 		// auth chain, where intermediate hops (e.g. custom-domain bounces)
 		// could drop or rewrite the value and land the user on a non-existent
 		// route after authentication. TokenHandler reads the cookie back when
-		// the provider redirects to /api/user/token, and clears it there.
-		// This runs ahead of the anonymous-session branch so that both exits
-		// obey the same rule: an abandoned earlier attempt must not outrank
-		// this login's own fallback, nor the ?ref= a later Sign In carries,
-		// for the whole LoginCookieDuration.
+		// the provider redirects to /api/user/token, and clears it there. A
+		// login that carries no ref deletes the cookie rather than leaving one:
+		// an abandoned earlier attempt would otherwise outrank this login's own
+		// fallback for the whole LoginCookieDuration.
 		l.persistRefCookie(w, refURLqueryParam)
-
-		if supportsAnonymousUserSessions {
-			l.InterceptLoginAndInitiateAnonymousUserSession(r, w)
-			return
-		}
 
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		w.Header().Set("Pragma", "no-cache")

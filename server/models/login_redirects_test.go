@@ -172,6 +172,36 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 			rawRef:   "/login?provider=Meshery",
 			expected: fallback,
 		},
+		// Browsers do not percent-encode a backslash in a query or fragment, so
+		// window.location can carry a literal one into the ref. Only the path
+		// can be read as an authority, so rejecting the whole ref over one in
+		// the query or fragment would silently drop the user's own page.
+		{
+			name:     "backslash in the query is preserved",
+			rawRef:   `/extension/meshmap?design=a\b`,
+			expected: `/extension/meshmap?design=a\b`,
+		},
+		{
+			name:     "backslash in the fragment is preserved",
+			rawRef:   `/extension/meshmap#c\d`,
+			expected: `/extension/meshmap#c\d`,
+		},
+		{
+			name:     "backslash in the query of a same-host absolute ref is preserved",
+			rawRef:   `https://kanvas.new/extension/meshmap?design=a\b`,
+			host:     host,
+			expected: `/extension/meshmap?design=a\b`,
+		},
+		{
+			name:     "backslash in the path still falls back when a query follows",
+			rawRef:   `/\evil.example?x=1`,
+			expected: fallback,
+		},
+		{
+			name:     "backslash in the path still falls back when a fragment follows",
+			rawRef:   `/\evil.example#x`,
+			expected: fallback,
+		},
 		// Reducing a same-host absolute ref to its path and query can itself
 		// produce a protocol-relative target. http.Redirect parses that back,
 		// finds a Host, and so skips the normalization that would have
@@ -462,6 +492,8 @@ func TestPostLoginRedirect_LocationKeepsOrdinaryDestinations(t *testing.T) {
 		"/extension/meshmap?mode=design#canvas":            "/extension/meshmap?mode=design#canvas",
 		"/extension/meshmap#canvas":                        "/extension/meshmap#canvas",
 		"https://kanvas.new/extension/meshmap?mode=design": "/extension/meshmap?mode=design",
+		`/extension/meshmap?design=a\b`:                    `/extension/meshmap?design=a\b`,
+		`/extension/meshmap#c\d`:                           `/extension/meshmap#c\d`,
 	}
 
 	for rawRef, want := range tests {
