@@ -639,6 +639,25 @@ func (l *RemoteProvider) clearRefCookie(w http.ResponseWriter) {
 	})
 }
 
+// persistRefCookie records this login attempt's post-login destination, and
+// deletes whatever a previous attempt left behind when this one carries none.
+// An empty value is never written: it would still parse as a present cookie on
+// the way back in and outrank the ?ref= the provider echoes back.
+func (l *RemoteProvider) persistRefCookie(w http.ResponseWriter, ref string) {
+	if ref == "" {
+		l.clearRefCookie(w)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     l.RefCookieName,
+		Value:    ref,
+		Expires:  time.Now().Add(l.LoginCookieDuration),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, // sent on top-level cross-site GET back from the provider
+	})
+}
+
 // InitiateLogin - initiates login flow and returns a true to indicate the handler to "return" or false to continue
 //
 // Every Remote Provider must offer this function
@@ -669,11 +688,6 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 			queryParams.Set("meshery_version", mesheryVersion)
 		}
 
-		if supportsAnonymousUserSessions {
-			l.InterceptLoginAndInitiateAnonymousUserSession(r, w)
-			return
-		}
-
 		// Capture the originally-requested in-app path as the post-login
 		// redirect target. Meshery owns this state in a cookie on its own
 		// domain rather than round-tripping it through the remote provider's
@@ -681,21 +695,15 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 		// could drop or rewrite the value and land the user on a non-existent
 		// route after authentication. TokenHandler reads the cookie back when
 		// the provider redirects to /api/user/token, and clears it there.
-		// Only this branch reaches TokenHandler. A login that carries no ref
-		// deletes the cookie rather than leaving one: an abandoned earlier
-		// attempt would otherwise outrank both this login's fallback and the
-		// ?ref= the provider echoes back, for the whole LoginCookieDuration.
-		if refURLqueryParam != "" {
-			http.SetCookie(w, &http.Cookie{
-				Name:     l.RefCookieName,
-				Value:    refURLqueryParam,
-				Expires:  time.Now().Add(l.LoginCookieDuration),
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode, // sent on top-level cross-site GET back from the provider
-			})
-		} else {
-			l.clearRefCookie(w)
+		// This runs ahead of the anonymous-session branch so that both exits
+		// obey the same rule: an abandoned earlier attempt must not outrank
+		// this login's own fallback, nor the ?ref= a later Sign In carries,
+		// for the whole LoginCookieDuration.
+		l.persistRefCookie(w, refURLqueryParam)
+
+		if supportsAnonymousUserSessions {
+			l.InterceptLoginAndInitiateAnonymousUserSession(r, w)
+			return
 		}
 
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")

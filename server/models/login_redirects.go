@@ -89,9 +89,21 @@ var authInitiationPaths = []string{
 	"/provider",
 }
 
+// escapesOrigin reports whether a redirect target can resolve to an authority
+// other than this server's. A leading "//" is protocol-relative, and a browser
+// resolves a backslash as an authority delimiter in the relative-slash state.
+// It has to be asked of the value actually handed to http.Redirect, not only of
+// the ref as received: reducing a same-host absolute ref to parsed.RequestURI()
+// turns "https://kanvas.new//evil.example" into the protocol-relative
+// "//evil.example", which http.Redirect writes out verbatim because the target
+// it parses carries a Host and so skips its own normalization.
+func escapesOrigin(target string) bool {
+	return strings.HasPrefix(target, "//") || strings.Contains(target, `\`)
+}
+
 // safePostLoginTarget validates a ref and returns the in-app path to redirect
-// to. A backslash is rejected outright: browsers resolve it as an authority
-// delimiter, so "/\evil.example" would leave the origin. The auth-path denylist
+// to. Anything that can leave the origin is rejected, both as the ref was
+// received and as it was reduced - see escapesOrigin. The auth-path denylist
 // runs over two spellings of the destination, because http.Redirect normalizes
 // the Location it writes: the decoded parsed path, which catches "%2e%2e"
 // traversal, and the effective Location, which is everything before the first
@@ -106,7 +118,7 @@ var authInitiationPaths = []string{
 // page would otherwise fail to match its own host. Every ref on another host
 // is rejected.
 func safePostLoginTarget(rawURL, host string) (string, bool) {
-	if rawURL == "" || strings.HasPrefix(rawURL, "//") || strings.Contains(rawURL, `\`) {
+	if rawURL == "" || escapesOrigin(rawURL) {
 		return "", false
 	}
 
@@ -122,6 +134,10 @@ func safePostLoginTarget(rawURL, host string) (string, bool) {
 		}
 		target = parsed.RequestURI()
 	} else if !strings.HasPrefix(rawURL, "/") {
+		return "", false
+	}
+
+	if escapesOrigin(target) {
 		return "", false
 	}
 

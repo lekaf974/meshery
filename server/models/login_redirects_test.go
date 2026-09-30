@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -169,6 +170,28 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 		{
 			name:     "/login with query falls back",
 			rawRef:   "/login?provider=Meshery",
+			expected: fallback,
+		},
+		// Reducing a same-host absolute ref to its path and query can itself
+		// produce a protocol-relative target. http.Redirect parses that back,
+		// finds a Host, and so skips the normalization that would have
+		// collapsed it - writing "//evil.example/..." out verbatim.
+		{
+			name:     "same-host absolute ref with a double-slash path falls back",
+			rawRef:   "https://kanvas.new//evil.example/pretend-login?x=1",
+			host:     host,
+			expected: fallback,
+		},
+		{
+			name:     "encoded same-host absolute ref with a double-slash path falls back",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://kanvas.new//evil.example")),
+			host:     host,
+			expected: fallback,
+		},
+		{
+			name:     "same-host absolute ref with a triple-slash path falls back",
+			rawRef:   "https://kanvas.new///evil.example",
+			host:     host,
 			expected: fallback,
 		},
 		// http.Redirect splits the Location at the first "?" and runs path.Clean
@@ -453,6 +476,54 @@ func TestPostLoginRedirect_LocationKeepsOrdinaryDestinations(t *testing.T) {
 
 			if got := rec.Header().Get("Location"); got != want {
 				t.Fatalf("ref %q emitted Location %q, want %q", rawRef, got, want)
+			}
+		})
+	}
+}
+
+// "Keep every cross-origin ref rejected" is a property of the Location the
+// browser receives, so it is asserted against the real normalizer. A Location
+// that parses with a Host, or that carries a backslash, resolves to another
+// authority - which is a phishing bounce off a just-authenticated session.
+func TestPostLoginRedirect_LocationNeverLeavesTheOrigin(t *testing.T) {
+	t.Parallel()
+
+	const host = "kanvas.new"
+
+	hostile := []string{
+		"https://kanvas.new//evil.example/pretend-login?x=1",
+		"https://kanvas.new//evil.example",
+		"https://kanvas.new///evil.example",
+		"http://kanvas.new//evil.example/pretend-login",
+		"//evil.example/pretend-login",
+		"///evil.example",
+		`/\evil.example`,
+		`/\/evil.example`,
+		"https://evil.example/pretend-login",
+		base64.RawURLEncoding.EncodeToString([]byte("https://kanvas.new//evil.example/pretend-login")),
+		base64.StdEncoding.EncodeToString([]byte("https://kanvas.new//evil.example/pretend-login")),
+	}
+
+	for _, rawRef := range hostile {
+		rawRef := rawRef
+		t.Run(rawRef, func(t *testing.T) {
+			t.Parallel()
+
+			target := resolvePostLoginRedirect(rawRef, "/", host)
+
+			rec := httptest.NewRecorder()
+			http.Redirect(rec, httptest.NewRequest(http.MethodGet, "/api/user/token", nil), target, http.StatusFound)
+
+			location := rec.Header().Get("Location")
+			landed, err := url.Parse(location)
+			if err != nil {
+				t.Fatalf("parse Location %q: %v", location, err)
+			}
+			if landed.Host != "" || landed.Scheme != "" {
+				t.Fatalf("ref %q resolved to target %q, which http.Redirect emitted as Location %q - authority %q", rawRef, target, location, landed.Host)
+			}
+			if strings.Contains(location, `\`) {
+				t.Fatalf("ref %q resolved to target %q, which http.Redirect emitted as Location %q - a backslash a browser reads as an authority delimiter", rawRef, target, location)
 			}
 		})
 	}
