@@ -1,9 +1,11 @@
 package models
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -12,12 +14,12 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 
 	const fallback = "/"
 
-	const origin = "https://kanvas.new"
+	const host = "kanvas.new"
 
 	tests := []struct {
 		name     string
 		rawRef   string
-		origin   string
+		host     string
 		expected string
 	}{
 		{
@@ -43,43 +45,64 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 		{
 			name:     "encoded absolute url falls back",
 			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/phish")),
-			origin:   origin,
+			host:     host,
 			expected: fallback,
 		},
 		{
 			name:     "plain absolute url falls back",
 			rawRef:   "https://evil.example/phish",
-			origin:   origin,
+			host:     host,
 			expected: fallback,
 		},
 		{
 			name:     "same-origin absolute ref reduces to path and query",
 			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://kanvas.new/extension/meshmap?mode=design")),
-			origin:   origin,
+			host:     host,
 			expected: "/extension/meshmap?mode=design",
 		},
 		{
 			name:     "standard base64 same-origin absolute ref reduces to path and query",
 			rawRef:   base64.StdEncoding.EncodeToString([]byte("https://kanvas.new/extension/meshmap?mode=design#canvas")),
-			origin:   origin,
+			host:     host,
 			expected: "/extension/meshmap?mode=design",
 		},
 		{
 			name:     "cross-origin absolute ref is rejected",
 			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/extension/meshmap?mode=design")),
-			origin:   origin,
+			host:     host,
+			expected: fallback,
+		},
+		// A deployment that leaves MESHERY_SERVER_CALLBACK_URL unset derives its
+		// own origin as http://<host> even when it is served over TLS, so the
+		// scheme of an absolute ref carries no information about whether it is
+		// ours. Comparing it dropped mode=design from a genuinely same-host ref.
+		{
+			name:     "same-host absolute ref with a different scheme is accepted",
+			rawRef:   "http://kanvas.new/extension/meshmap?mode=design",
+			host:     host,
+			expected: "/extension/meshmap?mode=design",
+		},
+		{
+			name:     "same-host absolute ref on a different port is accepted",
+			rawRef:   "https://kanvas.new:8443/extension/meshmap?mode=design",
+			host:     host,
+			expected: "/extension/meshmap?mode=design",
+		},
+		{
+			name:     "host suffix of the server host is rejected",
+			rawRef:   "https://kanvas.new.evil.example/extension/meshmap?mode=design",
+			host:     host,
 			expected: fallback,
 		},
 		{
-			name:     "cross-scheme absolute ref is rejected",
-			rawRef:   "http://kanvas.new/extension/meshmap?mode=design",
-			origin:   origin,
+			name:     "absolute ref is rejected when the server host is unknown",
+			rawRef:   "https://kanvas.new/extension/meshmap?mode=design",
 			expected: fallback,
 		},
 		{
 			name:     "same-origin absolute auth path falls back",
 			rawRef:   "https://kanvas.new/user/login?provider=Meshery",
-			origin:   origin,
+			host:     host,
 			expected: fallback,
 		},
 		{
@@ -123,7 +146,7 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			actual := resolvePostLoginRedirect(tc.rawRef, fallback, tc.origin)
+			actual := resolvePostLoginRedirect(tc.rawRef, fallback, tc.host)
 			if actual != tc.expected {
 				t.Fatalf("expected redirect %q, got %q", tc.expected, actual)
 			}
@@ -149,11 +172,11 @@ func TestSelectPostLoginRefValue(t *testing.T) {
 			cookie:   &http.Cookie{Name: cookieName, Value: cookieValue},
 			expected: cookieValue,
 		},
-		// The cookie wins when it is present, including when a provider echoes a
-		// different ?ref=. That echo is what landed playground.meshery.io on a
-		// 404. When the cookie was never set (Sign In goes straight to the
-		// provider), ?ref= is the fallback the comment on selectPostLoginRefValue
-		// describes.
+		// The cookie wins when it carries a destination, including when a
+		// provider echoes a different ?ref=. That echo is what landed
+		// playground.meshery.io on a 404. When the cookie was never set (Sign In
+		// goes straight to the provider), ?ref= is the fallback the comment on
+		// selectPostLoginRefValue describes.
 		{
 			name:     "cookie wins over ?ref= query param",
 			cookie:   &http.Cookie{Name: cookieName, Value: cookieValue},
@@ -165,11 +188,14 @@ func TestSelectPostLoginRefValue(t *testing.T) {
 			query:    "?ref=" + queryValue,
 			expected: queryValue,
 		},
+		// An empty-valued cookie still parses as present. Treating it as a
+		// winning destination suppressed the ?ref= that a Sign In taken after an
+		// anonymous bootstrap carries, and dropped mode=design from the return.
 		{
-			name:     "ignores ?ref= query param when cookie is empty",
+			name:     "uses ?ref= query param when cookie value is empty",
 			cookie:   &http.Cookie{Name: cookieName, Value: ""},
 			query:    "?ref=" + queryValue,
-			expected: "",
+			expected: queryValue,
 		},
 		{
 			name:     "returns empty when cookie is missing",
@@ -190,5 +216,78 @@ func TestSelectPostLoginRefValue(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.expected, actual)
 			}
 		})
+	}
+}
+
+func TestPostLoginHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		mesheryServeURL any
+		requestHost     string
+		expected        string
+	}{
+		{
+			name:            "configured server url wins over inbound host",
+			mesheryServeURL: "http://kanvas.new",
+			requestHost:     "proxy.internal:8080",
+			expected:        "kanvas.new",
+		},
+		{
+			name:            "configured server url port is dropped",
+			mesheryServeURL: "http://localhost:9081",
+			requestHost:     "localhost:9081",
+			expected:        "localhost",
+		},
+		{
+			name:        "falls back to the inbound host without its port",
+			requestHost: "kanvas.new:9081",
+			expected:    "kanvas.new",
+		},
+		{
+			name:            "blank configured server url falls back to the inbound host",
+			mesheryServeURL: "   ",
+			requestHost:     "kanvas.new",
+			expected:        "kanvas.new",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, "/api/user/token", nil)
+			req.Host = tc.requestHost
+			if tc.mesheryServeURL != nil {
+				req = req.WithContext(context.WithValue(req.Context(), MesheryServerURL, tc.mesheryServeURL))
+			}
+			if actual := postLoginHost(req); actual != tc.expected {
+				t.Fatalf("expected host %q, got %q", tc.expected, actual)
+			}
+		})
+	}
+}
+
+// Regression for the kanvas.new report: an anonymous bootstrap leaves an
+// empty-valued ref cookie behind, the Sign In that follows returns to
+// /api/user/token carrying the absolute page URL in ?ref=, and the deployment
+// leaves MESHERY_SERVER_CALLBACK_URL unset so its own origin is http:// while
+// the page is https://. Either the shadowing cookie or the scheme comparison
+// alone was enough to drop mode=design from the return address.
+func TestPostLoginRedirect_KeepsQueryAfterAnonymousBootstrap(t *testing.T) {
+	t.Parallel()
+
+	const cookieName = "kanvas.new_ref"
+	ref := base64.StdEncoding.EncodeToString([]byte("https://kanvas.new/extension/meshmap?mode=design"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/token?token=abc&ref="+url.QueryEscape(ref), nil)
+	req.Host = "kanvas.new"
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: ""})
+	req = req.WithContext(context.WithValue(req.Context(), MesheryServerURL, "http://kanvas.new"))
+
+	actual := resolvePostLoginRedirect(selectPostLoginRefValue(req, cookieName), "/", postLoginHost(req))
+	if actual != "/extension/meshmap?mode=design" {
+		t.Fatalf("expected redirect %q, got %q", "/extension/meshmap?mode=design", actual)
 	}
 }

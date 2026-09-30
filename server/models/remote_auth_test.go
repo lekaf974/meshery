@@ -468,3 +468,99 @@ func TestRemoteProviderDoRequest_XAPIKeyAnonymousOnly(t *testing.T) {
 		t.Fatalf("authenticated request with inbound X-API-Key must strip it, got %q", got)
 	}
 }
+
+func refCookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+// The ref cookie is the post-login destination Meshery owns on its own domain,
+// and TokenHandler prefers it over the ?ref= a provider sends back. A cookie
+// that carries nothing therefore has to be left unwritten rather than written
+// empty: an empty one still parses as present on the way back in and shadowed
+// the ?ref= that a later Sign In carried, which is how mode=design was dropped
+// from the return address.
+func TestRemoteProviderInitiateLogin_WritesRefCookieOnlyWhenItCarriesADestination(t *testing.T) {
+	const refCookieName = "cloud.layer5.io_ref"
+	refValue := base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap?mode=design"))
+
+	tests := []struct {
+		name       string
+		requestURL string
+		expected   string
+	}{
+		{
+			name:       "no ref query writes no ref cookie",
+			requestURL: "http://localhost:9081/user/login",
+		},
+		{
+			name:       "empty ref query writes no ref cookie",
+			requestURL: "http://localhost:9081/user/login?ref=",
+		},
+		{
+			name:       "ref query is captured in the cookie",
+			requestURL: "http://localhost:9081/user/login?ref=" + refValue,
+			expected:   refValue,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			provider := newTestRemoteProvider(t, "http://localhost:9876")
+			provider.RefCookieName = refCookieName
+			provider.LoginCookieDuration = time.Hour
+
+			rec := httptest.NewRecorder()
+			provider.InitiateLogin(rec, newRemoteLoginRequest(t, tc.requestURL), false)
+
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+			}
+
+			ck := refCookie(rec, refCookieName)
+			if tc.expected == "" {
+				if ck != nil {
+					t.Fatalf("a ref cookie was set with no destination to carry: %q", ck.Value)
+				}
+				return
+			}
+			if ck == nil {
+				t.Fatalf("expected a ref cookie carrying %q, got none", tc.expected)
+			}
+			if ck.Value != tc.expected {
+				t.Fatalf("ref cookie = %q, want %q", ck.Value, tc.expected)
+			}
+		})
+	}
+}
+
+// An anonymous session never returns through TokenHandler, so nothing clears a
+// ref cookie written on that branch. Leaving one behind outranked the ?ref= of
+// every Sign In taken in the following hour.
+func TestRemoteProviderInitiateLogin_AnonymousSessionLeavesNoRefCookie(t *testing.T) {
+	const refCookieName = "cloud.layer5.io_ref"
+	refValue := base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap"))
+
+	provider, closeServer := newAnonymousFlowProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"accessToken":"eyJhbGciOiJIUzI1NiJ9.e30.sig"}`))
+	})
+	defer closeServer()
+	provider.RefCookieName = refCookieName
+	provider.LoginCookieDuration = time.Hour
+
+	req := newRemoteLoginRequest(t, "http://localhost:9081/user/login?ref="+refValue)
+	req = req.WithContext(context.WithValue(req.Context(), MesheryServerURL, "http://localhost:9081"))
+
+	rec := httptest.NewRecorder()
+	provider.InitiateLogin(rec, req, false)
+
+	if ck := refCookie(rec, refCookieName); ck != nil {
+		t.Fatalf("a ref cookie was left behind by the anonymous session: %q", ck.Value)
+	}
+}

@@ -647,22 +647,6 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 
 	ck, err := r.Cookie(TokenCookieName)
 	if err != nil || ck.Value == "" {
-		// Capture the originally-requested in-app path as the post-login
-		// redirect target. Meshery owns this state in a cookie on its own
-		// domain rather than round-tripping it through the remote provider's
-		// auth chain, where intermediate hops (e.g. custom-domain bounces)
-		// could drop or rewrite the value and land the user on a non-existent
-		// route after authentication. TokenHandler reads the cookie back when
-		// the provider redirects to /api/user/token.
-		http.SetCookie(w, &http.Cookie{
-			Name:     l.RefCookieName,
-			Value:    refURLqueryParam,
-			Expires:  time.Now().Add(l.LoginCookieDuration),
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, // sent on top-level cross-site GET back from the provider
-		})
-
 		queryParams := url.Values{
 			"source": []string{base64.RawURLEncoding.EncodeToString([]byte(baseCallbackURL))},
 		}
@@ -676,6 +660,28 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 		if supportsAnonymousUserSessions {
 			l.InterceptLoginAndInitiateAnonymousUserSession(r, w)
 			return
+		}
+
+		// Capture the originally-requested in-app path as the post-login
+		// redirect target. Meshery owns this state in a cookie on its own
+		// domain rather than round-tripping it through the remote provider's
+		// auth chain, where intermediate hops (e.g. custom-domain bounces)
+		// could drop or rewrite the value and land the user on a non-existent
+		// route after authentication. TokenHandler reads the cookie back when
+		// the provider redirects to /api/user/token, and clears it there.
+		// Only this branch reaches TokenHandler, and only a value worth
+		// redirecting to is worth persisting: an empty or unredeemed cookie
+		// outranks the ?ref= that a later Sign In carries, which is how
+		// mode=design got dropped from the return address.
+		if refURLqueryParam != "" {
+			http.SetCookie(w, &http.Cookie{
+				Name:     l.RefCookieName,
+				Value:    refURLqueryParam,
+				Expires:  time.Now().Add(l.LoginCookieDuration),
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode, // sent on top-level cross-site GET back from the provider
+			})
 		}
 
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -4147,10 +4153,11 @@ func (l *RemoteProvider) TokenHandler(w http.ResponseWriter, r *http.Request, _ 
 		redirectURL = GetRedirectURLForNavigatorExtension(&providerProperties, l.Log)
 	}
 
-	// Post-login redirect target. The cookie set by InitiateLogin wins; when it
-	// is absent, selectPostLoginRefValue falls back to ?ref=. A same-origin
-	// absolute ref is reduced to its path and query. Cross-origin refs are rejected.
-	redirectURL = resolvePostLoginRedirect(selectPostLoginRefValue(r, l.RefCookieName), redirectURL, postLoginOrigin(r))
+	// Post-login redirect target. A ref cookie set by InitiateLogin wins; when
+	// it is absent or empty, selectPostLoginRefValue falls back to ?ref=. An
+	// absolute ref on Meshery's own host is reduced to its path and query.
+	// Refs on any other host are rejected.
+	redirectURL = resolvePostLoginRedirect(selectPostLoginRefValue(r, l.RefCookieName), redirectURL, postLoginHost(r))
 	// One-shot cookie: clear it now that we've resolved the destination so a
 	// stale value can't override the next login flow.
 	http.SetCookie(w, &http.Cookie{
