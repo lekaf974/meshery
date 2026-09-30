@@ -487,24 +487,41 @@ func refCookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 func TestRemoteProviderInitiateLogin_WritesRefCookieOnlyWhenItCarriesADestination(t *testing.T) {
 	const refCookieName = "cloud.layer5.io_ref"
 	refValue := base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap?mode=design"))
+	staleValue := base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap?mode=abandoned"))
 
 	tests := []struct {
-		name       string
-		requestURL string
-		expected   string
+		name        string
+		requestURL  string
+		staleCookie string
+		expected    string
 	}{
 		{
-			name:       "no ref query writes no ref cookie",
+			name:       "no ref query deletes the ref cookie",
 			requestURL: "http://localhost:9081/user/login",
 		},
 		{
-			name:       "empty ref query writes no ref cookie",
+			name:       "empty ref query deletes the ref cookie",
 			requestURL: "http://localhost:9081/user/login?ref=",
+		},
+		// An abandoned login leaves its destination in the jar for the whole
+		// LoginCookieDuration. The next login carries no ref, so without a
+		// deletion TokenHandler would redeem the abandoned attempt's target in
+		// preference to this login's own fallback.
+		{
+			name:        "a login with no ref deletes a stale ref cookie",
+			requestURL:  "http://localhost:9081/user/login",
+			staleCookie: staleValue,
 		},
 		{
 			name:       "ref query is captured in the cookie",
 			requestURL: "http://localhost:9081/user/login?ref=" + refValue,
 			expected:   refValue,
+		},
+		{
+			name:        "ref query overwrites a stale ref cookie",
+			requestURL:  "http://localhost:9081/user/login?ref=" + refValue,
+			staleCookie: staleValue,
+			expected:    refValue,
 		},
 	}
 
@@ -515,25 +532,33 @@ func TestRemoteProviderInitiateLogin_WritesRefCookieOnlyWhenItCarriesADestinatio
 			provider.RefCookieName = refCookieName
 			provider.LoginCookieDuration = time.Hour
 
+			req := newRemoteLoginRequest(t, tc.requestURL)
+			if tc.staleCookie != "" {
+				req.AddCookie(&http.Cookie{Name: refCookieName, Value: tc.staleCookie})
+			}
+
 			rec := httptest.NewRecorder()
-			provider.InitiateLogin(rec, newRemoteLoginRequest(t, tc.requestURL), false)
+			provider.InitiateLogin(rec, req, false)
 
 			if rec.Code != http.StatusFound {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 			}
 
 			ck := refCookie(rec, refCookieName)
+			if ck == nil {
+				t.Fatal("expected a ref cookie header, got none")
+			}
 			if tc.expected == "" {
-				if ck != nil {
-					t.Fatalf("a ref cookie was set with no destination to carry: %q", ck.Value)
+				if ck.Value != "" || ck.MaxAge >= 0 {
+					t.Fatalf("expected the ref cookie to be deleted, got value %q with MaxAge %d", ck.Value, ck.MaxAge)
 				}
 				return
 			}
-			if ck == nil {
-				t.Fatalf("expected a ref cookie carrying %q, got none", tc.expected)
-			}
 			if ck.Value != tc.expected {
 				t.Fatalf("ref cookie = %q, want %q", ck.Value, tc.expected)
+			}
+			if ck.MaxAge < 0 {
+				t.Fatalf("ref cookie carrying %q was emitted as a deletion", ck.Value)
 			}
 		})
 	}

@@ -627,6 +627,18 @@ func (l *RemoteProvider) InterceptLoginAndInitiateAnonymousUserSession(req *http
 	http.Redirect(res, req, redirectURL, http.StatusFound)
 }
 
+// clearRefCookie removes the post-login ref cookie, so that neither an
+// abandoned login attempt nor a redeemed one can supply the destination of the
+// next one.
+func (l *RemoteProvider) clearRefCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     l.RefCookieName,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+}
+
 // InitiateLogin - initiates login flow and returns a true to indicate the handler to "return" or false to continue
 //
 // Every Remote Provider must offer this function
@@ -669,10 +681,10 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 		// could drop or rewrite the value and land the user on a non-existent
 		// route after authentication. TokenHandler reads the cookie back when
 		// the provider redirects to /api/user/token, and clears it there.
-		// Only this branch reaches TokenHandler, and only a value worth
-		// redirecting to is worth persisting: an empty or unredeemed cookie
-		// outranks the ?ref= that a later Sign In carries, which is how
-		// mode=design got dropped from the return address.
+		// Only this branch reaches TokenHandler. A login that carries no ref
+		// deletes the cookie rather than leaving one: an abandoned earlier
+		// attempt would otherwise outrank both this login's fallback and the
+		// ?ref= the provider echoes back, for the whole LoginCookieDuration.
 		if refURLqueryParam != "" {
 			http.SetCookie(w, &http.Cookie{
 				Name:     l.RefCookieName,
@@ -682,6 +694,8 @@ func (l *RemoteProvider) InitiateLogin(w http.ResponseWriter, r *http.Request, _
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode, // sent on top-level cross-site GET back from the provider
 			})
+		} else {
+			l.clearRefCookie(w)
 		}
 
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -4160,12 +4174,7 @@ func (l *RemoteProvider) TokenHandler(w http.ResponseWriter, r *http.Request, _ 
 	redirectURL = resolvePostLoginRedirect(selectPostLoginRefValue(r, l.RefCookieName), redirectURL, postLoginHost(r))
 	// One-shot cookie: clear it now that we've resolved the destination so a
 	// stale value can't override the next login flow.
-	http.SetCookie(w, &http.Cookie{
-		Name:     l.RefCookieName,
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
+	l.clearRefCookie(w)
 
 	go func() {
 		credential := make(map[string]interface{}, 0)

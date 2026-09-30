@@ -171,6 +171,30 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 			rawRef:   "/login?provider=Meshery",
 			expected: fallback,
 		},
+		// http.Redirect splits the Location at the first "?" and runs path.Clean
+		// over everything before it, the fragment included. A ref with a
+		// fragment and no query therefore has its ".." applied to the path
+		// after the denylist has already passed the parsed path.
+		{
+			name:     "fragment traversal onto an auth path falls back",
+			rawRef:   "/extension/meshmap#/../../user/login",
+			expected: fallback,
+		},
+		{
+			name:     "fragment traversal onto the token endpoint falls back",
+			rawRef:   "/extension/meshmap#/../../api/user/token",
+			expected: fallback,
+		},
+		{
+			name:     "encoded fragment traversal onto an auth path falls back",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap#/../../login")),
+			expected: fallback,
+		},
+		{
+			name:     "plain fragment is preserved",
+			rawRef:   "/extension/meshmap#canvas",
+			expected: "/extension/meshmap#canvas",
+		},
 		{
 			name:     "same-host absolute /login falls back",
 			rawRef:   "https://kanvas.new/login",
@@ -356,5 +380,80 @@ func TestPostLoginRedirect_KeepsQueryAfterAnonymousBootstrap(t *testing.T) {
 	actual := resolvePostLoginRedirect(selectPostLoginRefValue(req, cookieName), "/", postLoginHost(req))
 	if actual != "/extension/meshmap?mode=design" {
 		t.Fatalf("expected redirect %q, got %q", "/extension/meshmap?mode=design", actual)
+	}
+}
+
+// The denylist exists to stop a post-login redirect from re-entering the OAuth
+// dance, and what decides that is the Location the browser receives - not the
+// ref as written. http.Redirect normalizes the Location, so the guarantee is
+// only worth as much as it is against the real normalizer. Every hostile ref
+// here reached an auth-initiation path through that normalization.
+func TestPostLoginRedirect_LocationNeverReachesAnAuthPath(t *testing.T) {
+	t.Parallel()
+
+	const host = "kanvas.new"
+
+	hostile := []string{
+		"/extension/meshmap#/../../user/login",
+		"/extension/meshmap#/../../api/user/token",
+		"/extension/meshmap#/../../login",
+		"/extension/meshmap#/../../auth/login",
+		"/extension/meshmap#/../../provider",
+		"/../user/login",
+		"/extension/meshmap/../../user/login",
+		base64.RawURLEncoding.EncodeToString([]byte("/extension/meshmap#/../../user/login")),
+		base64.StdEncoding.EncodeToString([]byte("/extension/meshmap#/../../api/user/token")),
+	}
+
+	for _, rawRef := range hostile {
+		rawRef := rawRef
+		t.Run(rawRef, func(t *testing.T) {
+			t.Parallel()
+
+			target := resolvePostLoginRedirect(rawRef, "/", host)
+
+			rec := httptest.NewRecorder()
+			http.Redirect(rec, httptest.NewRequest(http.MethodGet, "/api/user/token", nil), target, http.StatusFound)
+
+			location := rec.Header().Get("Location")
+			landed, err := url.Parse(location)
+			if err != nil {
+				t.Fatalf("parse Location %q: %v", location, err)
+			}
+			if !isAllowedAppPath(landed.Path) {
+				t.Fatalf("ref %q resolved to target %q, which http.Redirect emitted as Location %q - an auth-initiation path", rawRef, target, location)
+			}
+		})
+	}
+}
+
+// The ordinary destinations have to survive the same normalization, or the
+// guard above would be satisfied by rejecting everything.
+func TestPostLoginRedirect_LocationKeepsOrdinaryDestinations(t *testing.T) {
+	t.Parallel()
+
+	const host = "kanvas.new"
+
+	tests := map[string]string{
+		"/extension/meshmap?mode=design":                   "/extension/meshmap?mode=design",
+		"/extension/meshmap?mode=design#canvas":            "/extension/meshmap?mode=design#canvas",
+		"/extension/meshmap#canvas":                        "/extension/meshmap#canvas",
+		"https://kanvas.new/extension/meshmap?mode=design": "/extension/meshmap?mode=design",
+	}
+
+	for rawRef, want := range tests {
+		rawRef, want := rawRef, want
+		t.Run(rawRef, func(t *testing.T) {
+			t.Parallel()
+
+			target := resolvePostLoginRedirect(rawRef, "/", host)
+
+			rec := httptest.NewRecorder()
+			http.Redirect(rec, httptest.NewRequest(http.MethodGet, "/api/user/token", nil), target, http.StatusFound)
+
+			if got := rec.Header().Get("Location"); got != want {
+				t.Fatalf("ref %q emitted Location %q, want %q", rawRef, got, want)
+			}
+		})
 	}
 }

@@ -92,8 +92,12 @@ var authInitiationPaths = []string{
 // safePostLoginTarget validates a ref and returns the in-app path to redirect
 // to. A backslash is rejected outright: browsers resolve it as an authority
 // delimiter, so "/\evil.example" would leave the origin. The auth-path denylist
-// runs against the cleaned path, because http.Redirect itself cleans the
-// Location it writes, so "/../user/login" would otherwise reach /user/login.
+// runs over two spellings of the destination, because http.Redirect normalizes
+// the Location it writes: the decoded parsed path, which catches "%2e%2e"
+// traversal, and the effective Location, which is everything before the first
+// "?" run through path.Clean exactly as the stdlib does it. Without the second,
+// "/extension/meshmap#/../../user/login" passes the check as its own path and
+// is then cleaned to /user/login on the way out.
 // Relative refs are kept as-is (path, query, and hash). An absolute ref on
 // Meshery's own host is reduced to its path and query so an older client that
 // sent window.location.href still lands on the design page. The scheme is not
@@ -121,7 +125,12 @@ func safePostLoginTarget(rawURL, host string) (string, bool) {
 		return "", false
 	}
 
-	if !isAllowedAppPath(path.Clean(parsed.Path)) {
+	effective := target
+	if i := strings.Index(effective, "?"); i != -1 {
+		effective = effective[:i]
+	}
+
+	if !isAllowedAppPath(path.Clean(parsed.Path)) || !isAllowedAppPath(path.Clean(effective)) {
 		return "", false
 	}
 
