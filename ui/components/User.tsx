@@ -70,7 +70,12 @@ const User = (props) => {
 
   const source = new URL('/api/user/token', window.location.origin);
   const sourceURL = btoa(source.toString());
-  const refURL = btoa(window.location.href);
+  // Relative ref keeps search and hash (including mode=design). An absolute
+  // href is a same-origin URL the server used to reject, dropping the user
+  // on /extension/meshmap with the query stripped.
+  const refURL = btoa(
+    `${window.location.pathname}${window.location.search}${window.location.hash}`,
+  );
 
   if (userData?.status == 'anonymous') {
     const url = `${providerCapabilities?.providerUrl}?anonymousUserID=${userData?.id}&source=${sourceURL}&ref=${refURL}`;

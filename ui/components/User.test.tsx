@@ -109,6 +109,20 @@ const setWindowLocation = (href: string) => {
         return '';
       }
     },
+    get search() {
+      try {
+        return new URL(current).search;
+      } catch {
+        return '';
+      }
+    },
+    get hash() {
+      try {
+        return new URL(current).hash;
+      } catch {
+        return '';
+      }
+    },
     toString() {
       return current;
     },
@@ -155,6 +169,24 @@ describe('User component', () => {
 
     expect(screen.getByTestId('profile-button')).toBeInTheDocument();
     expect(screen.getByTestId('avatar')).toHaveAttribute('src', 'https://cdn.test/me.png');
+  });
+
+  it('sends a relative Sign In ref that keeps mode=design', () => {
+    setWindowLocation('https://kanvas.new/extension/meshmap?mode=design#canvas');
+    mockGetUserQuery = {
+      data: { status: 'anonymous', id: 'anon-1' },
+      isSuccess: true,
+      isError: false,
+      error: undefined,
+    };
+
+    render(<UserProvider />);
+
+    const link = screen.getByTestId('next-link') as HTMLAnchorElement;
+    const href = link.getAttribute('href') || '';
+    const ref = new URL(href).searchParams.get('ref');
+    expect(ref).toBeTruthy();
+    expect(atob(ref as string)).toBe('/extension/meshmap?mode=design#canvas');
   });
 
   it('renders a Sign In button when the user is anonymous', () => {

@@ -12,9 +12,12 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 
 	const fallback = "/"
 
+	const origin = "https://kanvas.new"
+
 	tests := []struct {
 		name     string
 		rawRef   string
+		origin   string
 		expected string
 	}{
 		{
@@ -33,13 +36,50 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 			expected: "/extension/meshmap",
 		},
 		{
+			name:     "relative ref keeps search and hash",
+			rawRef:   "/extension/meshmap?mode=design#canvas",
+			expected: "/extension/meshmap?mode=design#canvas",
+		},
+		{
 			name:     "encoded absolute url falls back",
 			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/phish")),
+			origin:   origin,
 			expected: fallback,
 		},
 		{
 			name:     "plain absolute url falls back",
 			rawRef:   "https://evil.example/phish",
+			origin:   origin,
+			expected: fallback,
+		},
+		{
+			name:     "same-origin absolute ref reduces to path and query",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://kanvas.new/extension/meshmap?mode=design")),
+			origin:   origin,
+			expected: "/extension/meshmap?mode=design",
+		},
+		{
+			name:     "standard base64 same-origin absolute ref reduces to path and query",
+			rawRef:   base64.StdEncoding.EncodeToString([]byte("https://kanvas.new/extension/meshmap?mode=design#canvas")),
+			origin:   origin,
+			expected: "/extension/meshmap?mode=design",
+		},
+		{
+			name:     "cross-origin absolute ref is rejected",
+			rawRef:   base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/extension/meshmap?mode=design")),
+			origin:   origin,
+			expected: fallback,
+		},
+		{
+			name:     "cross-scheme absolute ref is rejected",
+			rawRef:   "http://kanvas.new/extension/meshmap?mode=design",
+			origin:   origin,
+			expected: fallback,
+		},
+		{
+			name:     "same-origin absolute auth path falls back",
+			rawRef:   "https://kanvas.new/user/login?provider=Meshery",
+			origin:   origin,
 			expected: fallback,
 		},
 		{
@@ -83,7 +123,7 @@ func TestResolvePostLoginRedirect(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			actual := resolvePostLoginRedirect(tc.rawRef, fallback)
+			actual := resolvePostLoginRedirect(tc.rawRef, fallback, tc.origin)
 			if actual != tc.expected {
 				t.Fatalf("expected redirect %q, got %q", tc.expected, actual)
 			}
@@ -109,15 +149,21 @@ func TestSelectPostLoginRefValue(t *testing.T) {
 			cookie:   &http.Cookie{Name: cookieName, Value: cookieValue},
 			expected: cookieValue,
 		},
-		// Regression: the cookie is the SOLE source of truth. A ?ref= the
-		// remote provider echoes back must never override (or fill in for)
-		// the cookie — that's how the playground.meshery.io 404 escaped in
-		// the first place. resolvePostLoginRedirect's "/" fallback handles
-		// the missing-cookie case without us re-trusting provider state.
+		// The cookie wins when it is present, including when a provider echoes a
+		// different ?ref=. That echo is what landed playground.meshery.io on a
+		// 404. When the cookie was never set (Sign In goes straight to the
+		// provider), ?ref= is the fallback the comment on selectPostLoginRefValue
+		// describes.
 		{
-			name:     "ignores ?ref= query param even when cookie missing",
+			name:     "cookie wins over ?ref= query param",
+			cookie:   &http.Cookie{Name: cookieName, Value: cookieValue},
 			query:    "?ref=" + queryValue,
-			expected: "",
+			expected: cookieValue,
+		},
+		{
+			name:     "uses ?ref= query param when cookie is missing",
+			query:    "?ref=" + queryValue,
+			expected: queryValue,
 		},
 		{
 			name:     "ignores ?ref= query param when cookie is empty",
