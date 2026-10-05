@@ -42,7 +42,7 @@ UI maintainers are responsible for the development and maintenance of Meshery's 
 | Nikhil Ladha       | @Nikhil-Ladha   | IBM           |
 | Antonette Caldwell | @acald-creator  | Acquia        |
 | Aabid Sofi         | @aabidsofi19    | Independent   |
-| Yash Sharma        | @Yashsharma1911 | Digital Ocean |
+| Yash Sharma        | @Yashsharma1911 | UiPath        |
 | Sudhanshu Dasgupta | @sudhanshutech  | SafeDep       |
 | Ian Whitney        | @ianrwhitney    | Intuit        |
 
