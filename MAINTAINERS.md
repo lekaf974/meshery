@@ -105,7 +105,7 @@ Repositories:
 | Alex Quinn          | @alexquincy     | Netflix       |
 | Marcus Blom         | @marblom007     | AWS           |
 | Kate Suttons        | @suttonskate    | Layer5        |
-| Yash Sharma         | @Yashsharma1911 | Digital Ocean |
+| Yash Sharma         | @Yashsharma1911 | UiPath        |
 | Shivay Lamba        | @shivaylamba    | Qualcomm      |
 
 Repositories:
